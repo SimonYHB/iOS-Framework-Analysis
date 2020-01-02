@@ -1,0 +1,7 @@
+target 'Stinger_Example' do
+  pod 'Stinger', :path => '../'
+  pod 'Aspects'
+  target 'Stinger_Tests' do
+    inherit! :search_paths
+  end
+end
