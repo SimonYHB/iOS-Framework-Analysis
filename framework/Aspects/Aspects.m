@@ -580,7 +580,7 @@ static BOOL aspect_isSelectorAllowedAndTrack(NSObject *self, SEL selector, Aspec
         disallowedSelectorList = [NSSet setWithObjects:@"retain", @"release", @"autorelease", @"forwardInvocation:", nil];
     });
 
-    // Check against the blacklist.
+    // 检查方法是否在黑名单中
     NSString *selectorName = NSStringFromSelector(selector);
     if ([disallowedSelectorList containsObject:selectorName]) {
         NSString *errorDescription = [NSString stringWithFormat:@"Selector %@ is blacklisted.", selectorName];
@@ -588,27 +588,28 @@ static BOOL aspect_isSelectorAllowedAndTrack(NSObject *self, SEL selector, Aspec
         return NO;
     }
 
-    // Additional checks.
+    // 只允许执行dealloc前对于Hook混写
     AspectOptions position = options&AspectPositionFilter;
     if ([selectorName isEqualToString:@"dealloc"] && position != AspectPositionBefore) {
         NSString *errorDesc = @"AspectPositionBefore is the only valid position when hooking dealloc.";
         AspectError(AspectErrorSelectorDeallocPosition, errorDesc);
         return NO;
     }
-
+    // 判断是否有该方法实现
     if (![self respondsToSelector:selector] && ![self.class instancesRespondToSelector:selector]) {
         NSString *errorDesc = [NSString stringWithFormat:@"Unable to find selector -[%@ %@].", NSStringFromClass(self.class), selectorName];
         AspectError(AspectErrorDoesNotRespondToSelector, errorDesc);
         return NO;
     }
 
-    // Search for the current class and the class hierarchy IF we are modifying a class object
+    // 对类对象的类层级进行判断，防止一个方法被多次Hook;实例对象无须考虑
     if (class_isMetaClass(object_getClass(self))) {
         Class klass = [self class];
         NSMutableDictionary *swizzledClassesDict = aspect_getSwizzledClassesDict();
         Class currentClass = [self class];
-
+        //  AspectTracker：一个用于追踪寻址方法是否已被Hook过的类
         AspectTracker *tracker = swizzledClassesDict[currentClass];
+        //  判断其子类是否有对该方法进行Hook
         if ([tracker subclassHasHookedSelectorName:selectorName]) {
             NSSet *subclassTracker = [tracker subclassTrackersHookingSelectorName:selectorName];
             NSSet *subclassNames = [subclassTracker valueForKey:@"trackedClassName"];
@@ -616,7 +617,7 @@ static BOOL aspect_isSelectorAllowedAndTrack(NSObject *self, SEL selector, Aspec
             AspectError(AspectErrorSelectorAlreadyHookedInClassHierarchy, errorDescription);
             return NO;
         }
-
+        // 沿着类对象的superClass指针向上寻到直到根类
         do {
             tracker = swizzledClassesDict[currentClass];
             if ([tracker.selectorNames containsObject:selectorName]) {
@@ -629,8 +630,8 @@ static BOOL aspect_isSelectorAllowedAndTrack(NSObject *self, SEL selector, Aspec
                 return NO;
             }
         } while ((currentClass = class_getSuperclass(currentClass)));
-
-        // Add the selector as being modified.
+        //  以上都通过则表明该方法在类对象中(包括其父类、子类)从未被Hook过
+        //  使用AspectTracker记录Hook信息，记录到继承连中的每一个类里
         currentClass = klass;
         AspectTracker *subclassTracker = nil;
         do {
