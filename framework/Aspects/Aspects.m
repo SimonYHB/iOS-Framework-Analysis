@@ -202,18 +202,21 @@ static BOOL aspect_isCompatibleBlockSignature(NSMethodSignature *blockSignature,
     NSCParameterAssert(selector);
 
     BOOL signaturesMatch = YES;
+    //  将需要Hook的方法转成签名
     NSMethodSignature *methodSignature = [[object class] instanceMethodSignatureForSelector:selector];
+    //  判断两个签名参数数量(block的参数不能超过Hook方法的参数量)
     if (blockSignature.numberOfArguments > methodSignature.numberOfArguments) {
         signaturesMatch = NO;
     }else {
         if (blockSignature.numberOfArguments > 1) {
+            //  判断第一个参数是否是@，即_cmd(当前方法的selector)，如果不是则说明不是标准的方法签名
             const char *blockType = [blockSignature getArgumentTypeAtIndex:1];
             if (blockType[0] != '@') {
                 signaturesMatch = NO;
             }
         }
-        // Argument 0 is self/block, argument 1 is SEL or id<AspectInfo>. We start comparing at argument 2.
-        // The block can have less arguments than the method, that's ok.
+        //  argument[0]是self/block，argument[1]是SEL/id<AspectInfo>，固从argument[2]开始比较
+        //  block的参数量是可以少于Hook方法的参数量
         if (signaturesMatch) {
             for (NSUInteger idx = 2; idx < blockSignature.numberOfArguments; idx++) {
                 const char *methodType = [methodSignature getArgumentTypeAtIndex:idx];
@@ -225,7 +228,7 @@ static BOOL aspect_isCompatibleBlockSignature(NSMethodSignature *blockSignature,
             }
         }
     }
-
+    //  抛出异常
     if (!signaturesMatch) {
         NSString *description = [NSString stringWithFormat:@"Block signature %@ doesn't match %@.", blockSignature, methodSignature];
         AspectError(AspectErrorIncompatibleBlockSignature, description);
@@ -631,7 +634,7 @@ static BOOL aspect_isSelectorAllowedAndTrack(NSObject *self, SEL selector, Aspec
             }
         } while ((currentClass = class_getSuperclass(currentClass)));
         //  以上都通过则表明该方法在类对象中(包括其父类、子类)从未被Hook过
-        //  使用AspectTracker记录Hook信息，记录到继承连中的每一个类里
+        //  使用AspectTracker记录Hook信息到继承链中的每一个类里
         currentClass = klass;
         AspectTracker *subclassTracker = nil;
         do {
@@ -819,11 +822,13 @@ static void aspect_deregisterTrackedSelector(id self, SEL selector) {
 + (instancetype)identifierWithSelector:(SEL)selector object:(id)object options:(AspectOptions)options block:(id)block error:(NSError **)error {
     NSCParameterAssert(block);
     NSCParameterAssert(selector);
+    //  将block转换成方法签名
     NSMethodSignature *blockSignature = aspect_blockMethodSignature(block, error); // TODO: check signature compatibility, etc.
+    //  判断要Hook的方法是否兼容block的参数个数和参数类型
     if (!aspect_isCompatibleBlockSignature(blockSignature, object, selector, error)) {
         return nil;
     }
-
+    //  组装AspectIdentifier
     AspectIdentifier *identifier = nil;
     if (blockSignature) {
         identifier = [AspectIdentifier new];
@@ -835,19 +840,26 @@ static void aspect_deregisterTrackedSelector(id self, SEL selector) {
     }
     return identifier;
 }
-
+//  触发block调用
+/*
+ 1.通过block的方法签名生成对应的NSInvocation
+ 2.把待Hook方法的参数，赋值给block的invocation
+ 3.通过invocation触发block的调用
+ */
 - (BOOL)invokeWithInfo:(id<AspectInfo>)info {
     NSInvocation *blockInvocation = [NSInvocation invocationWithMethodSignature:self.blockSignature];
     NSInvocation *originalInvocation = info.originalInvocation;
     NSUInteger numberOfArguments = self.blockSignature.numberOfArguments;
 
     // Be extra paranoid. We already check that on hook registration.
+    //  检查参数(在生成AspectIdentifier已经校验过，这里是一个额外的检验)
     if (numberOfArguments > originalInvocation.methodSignature.numberOfArguments) {
         AspectLogError(@"Block has too many arguments. Not calling %@", info);
         return NO;
     }
 
     // The `self` of the block will be the AspectInfo. Optional.
+    //  
     if (numberOfArguments > 1) {
         [blockInvocation setArgument:&info atIndex:1];
     }
