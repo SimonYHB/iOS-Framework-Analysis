@@ -11,5 +11,6 @@
 @interface AspectsViewController : UIViewController
 
 - (IBAction)buttonPressed:(id)sender;
-
+- (void)doNothing: (int)one;
+- (void)doObjectNothing: (NSDictionary *)dict andNum:(int)one;
 @end

@@ -31,4 +31,17 @@
     } error:NULL];
 }
 
+- (void)doNothing: (int)one{
+    NSLog(@"doNothing");
+}
+
+-(void)viewDidLoad {
+    [super viewDidLoad];
+    [self doNothing:2];
+}
+
+- (void)doObjectNothing: (NSDictionary *)dict andNum:(int)one {
+    
+}
+
 @end

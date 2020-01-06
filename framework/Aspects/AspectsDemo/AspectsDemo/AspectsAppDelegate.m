@@ -21,16 +21,34 @@
 
     // Ignore hooks when we are testing.
     if (!NSClassFromString(@"XCTestCase")) {
-        [aspectsController aspect_hookSelector:@selector(buttonPressed:) withOptions:0 usingBlock:^(id info, id sender) {
-            NSLog(@"Button was pressed by: %@", sender);
-        } error:NULL];
+        
+//
+//        [aspectsController aspect_hookSelector:@selector(buttonPressed:) withOptions:0 usingBlock:^(id info, id sender) {
+//            NSLog(@"Button was pressed by: %@", sender);
+//        } error:NULL];
 
-        [aspectsController aspect_hookSelector:@selector(viewWillLayoutSubviews) withOptions:0 usingBlock:^{
-            NSLog(@"Controller is layouting!");
+//        [aspectsController aspect_hookSelector:@selector(viewWillLayoutSubviews) withOptions:0 usingBlock:^{
+//            NSLog(@"Controller is layouting!");
+//        } error:NULL];
+        
+//        [aspectsController aspect_hookSelector:@selector(doNothing:) withOptions:0 usingBlock:^(id info, id num){
+//            NSLog(@"doNothing is hook!");
+//        } error:NULL];
+        
+//        [aspectsController aspect_hookSelector:@selector(viewWillAppear:) withOptions:AspectPositionInstead usingBlock:^(id info, id sender) {
+//            NSLog(@"doNothing is hook!");
+//        } error:NULL];
+        
+        [aspectsController aspect_hookSelector:@selector(doObjectNothing:andNum:) withOptions:AspectPositionInstead usingBlock:^(id info, id sender, int num) {
+            NSLog(@"doNothing is hook!");
         } error:NULL];
+        
+
+        
     }
 
     return YES;
 }
+
 
 @end

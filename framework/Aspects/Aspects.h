@@ -16,6 +16,7 @@ typedef NS_OPTIONS(NSUInteger, AspectOptions) {
 };
 
 /// Opaque Aspect Token that allows to deregister the hook.
+/// 用于注销Hook
 @protocol AspectToken <NSObject>
 
 /// Deregisters an aspect.
@@ -25,6 +26,7 @@ typedef NS_OPTIONS(NSUInteger, AspectOptions) {
 @end
 
 /// The AspectInfo protocol is the first parameter of our block syntax.
+/// 主要是所Hook方法的信息，用于校验block兼容性，后续触发block时会作为block的首个参数
 @protocol AspectInfo <NSObject>
 
 /// The instance that is currently hooked.
@@ -46,8 +48,7 @@ typedef NS_OPTIONS(NSUInteger, AspectOptions) {
 @interface NSObject (Aspects)
 
 /// 在调用指定类的某个方法之前/过程中/之后执行一段block代码
-/// Adds a block of code before/instead/after the current `selector` for a specific class.
-///
+/// block的第一个参数固定为id<AspectInfo>`, 所以要Hook的方法如果有参数，则第一个参数必须为对象，否则在比对签名时或校验不过
 /// @param block Aspects replicates the type signature of the method being hooked.
 /// The first parameter will be `id<AspectInfo>`, followed by all parameters of the method.
 /// These parameters are optional and will be filled to match the block signature.

@@ -15,10 +15,41 @@
 #define AspectLogError(...) do { NSLog(__VA_ARGS__); }while(0)
 
 // Block internals.
+/*
+ 从block源码(libclosure)可知
+ struct Block_layout {
+ void *isa;
+ int flags;
+ int reserved;
+ void (*invoke)(void *, ...);
+ struct Block_descriptor *descriptor;
+
+};
+struct Block_descriptor {
+    unsigned long int reserved;
+    unsigned long int size;
+    void (*copy)(void *dst, void *src);
+    void (*dispose)(void *);
+};
+ // Values for Block_layout->flags to describe block objects
+ enum {
+ BLOCK_DEALLOCATING =      (0x0001),  // runtime
+ BLOCK_REFCOUNT_MASK =     (0xfffe),  // runtime
+ BLOCK_NEEDS_FREE =        (1 << 24), // runtime
+ BLOCK_HAS_COPY_DISPOSE =  (1 << 25), // compiler
+ BLOCK_HAS_CTOR =          (1 << 26), // compiler: helpers have C++ code
+ BLOCK_IS_GC =             (1 << 27), // runtime
+ BLOCK_IS_GLOBAL =         (1 << 28), // compiler
+ BLOCK_USE_STRET =         (1 << 29), // compiler: undefined if !BLOCK_HAS_SIGNATURE
+ BLOCK_HAS_SIGNATURE  =    (1 << 30), // compiler
+ BLOCK_HAS_EXTENDED_LAYOUT=(1 << 31)  // compiler
+ };
+ */
 typedef NS_OPTIONS(int, AspectBlockFlags) {
-	AspectBlockFlagsHasCopyDisposeHelpers = (1 << 25),
+	AspectBlockFlagsHasCopyDisposeHelpers = (1 << 25), //判断是否有捕获外部参数，如果是全局block,则方法签名存在于signature上,如果是堆block,则存在于copy上
 	AspectBlockFlagsHasSignature          = (1 << 30)
 };
+//aspect自己封装的block
 typedef struct _AspectBlock {
 	__unused Class isa;
 	AspectBlockFlags flags;
@@ -182,8 +213,22 @@ static NSMethodSignature *aspect_blockMethodSignature(id block, NSError **error)
         AspectError(AspectErrorMissingBlockSignature, description);
         return nil;
     }
+    /*
+     struct {
+     unsigned long int reserved;
+     unsigned long int size;
+     // requires AspectBlockFlagsHasCopyDisposeHelpers
+     void (*copy)(void *dst, const void *src);
+     void (*dispose)(const void *);
+     // requires AspectBlockFlagsHasSignature
+     const char *signature;
+     const char *layout;
+     } *descriptor;
+     */
 	void *desc = layout->descriptor;
+    //  ↓此时指针位置是size后一位，如果是全局block则为*signature，堆block为*signature，
 	desc += 2 * sizeof(unsigned long int);
+    //  ↓如果是堆block，则有void (*copy)和void (*dispose)，固指针需要再偏移2*sizeof(void*)
 	if (layout->flags & AspectBlockFlagsHasCopyDisposeHelpers) {
 		desc += 2 * sizeof(void *);
     }
@@ -192,6 +237,7 @@ static NSMethodSignature *aspect_blockMethodSignature(id block, NSError **error)
         AspectError(AspectErrorMissingBlockSignature, description);
         return nil;
     }
+    //  此时指针位置对应*signature
 	const char *signature = (*(const char **)desc);
 	return [NSMethodSignature signatureWithObjCTypes:signature];
 }
@@ -205,16 +251,22 @@ static BOOL aspect_isCompatibleBlockSignature(NSMethodSignature *blockSignature,
     //  将需要Hook的方法转成签名
     NSMethodSignature *methodSignature = [[object class] instanceMethodSignatureForSelector:selector];
     //  判断两个签名参数数量(block的参数不能超过Hook方法的参数量)
+    /*
+     Unlike a typical method signature，a block type signature has no self ('@') or _cmd (':') parameter，but instead just one parameter for the block itself ('@?')。
+     在一般的方法签名中 block 的类型签名是没有 self ('@') 或者 _cmd (':') 的，只有一个参数代表 block 自己 ('@?').
+     
+     */
     if (blockSignature.numberOfArguments > methodSignature.numberOfArguments) {
         signaturesMatch = NO;
     }else {
         if (blockSignature.numberOfArguments > 1) {
-            //  判断第一个参数是否是@，即_cmd(当前方法的selector)，如果不是则说明不是标准的方法签名
+            //  按照作者规定，如果block有参数，则第一个必须为id<AspectInfo>,对应编码为@，如果不是则说明不是要求的block
             const char *blockType = [blockSignature getArgumentTypeAtIndex:1];
             if (blockType[0] != '@') {
                 signaturesMatch = NO;
             }
         }
+        
         //  argument[0]是self/block，argument[1]是SEL/id<AspectInfo>，固从argument[2]开始比较
         //  block的参数量是可以少于Hook方法的参数量
         if (signaturesMatch) {
