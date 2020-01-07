@@ -49,7 +49,7 @@ typedef NS_OPTIONS(int, AspectBlockFlags) {
 	AspectBlockFlagsHasCopyDisposeHelpers = (1 << 25), //判断是否有捕获外部参数，如果是全局block,则方法签名存在于signature上,如果是堆block,则存在于copy上
 	AspectBlockFlagsHasSignature          = (1 << 30)
 };
-//aspect自己封装的block
+//  aspect自己封装的block
 typedef struct _AspectBlock {
 	__unused Class isa;
 	AspectBlockFlags flags;
@@ -86,7 +86,8 @@ typedef struct _AspectBlock {
 @property (nonatomic, assign) AspectOptions options;
 @end
 
-// Tracks all aspects for an object/class.
+//  AspectsContainer是一个对象或者类的所有的 Aspects 的容器
+//  每次注入Aspects时会将其按照option里的时机放到对应数组中，方便后续的统一管理(例如移除)
 @interface AspectsContainer : NSObject
 - (void)addAspect:(AspectIdentifier *)aspect withOptions:(AspectOptions)injectPosition;
 - (BOOL)removeAspect:(id)aspect;
@@ -96,11 +97,13 @@ typedef struct _AspectBlock {
 @property (atomic, copy) NSArray *afterAspects;
 @end
 
+//  每个类都有一个AspectTracker，用于追踪记录该类被Hook的方法
 @interface AspectTracker : NSObject
 - (id)initWithTrackedClass:(Class)trackedClass;
 @property (nonatomic, strong) Class trackedClass;
 @property (nonatomic, readonly) NSString *trackedClassName;
 @property (nonatomic, strong) NSMutableSet *selectorNames;
+//用于标记其所有子类有Hook的方法 示例：[HookingSelectorName: (AspectTracker1,AspectTracker2...)]
 @property (nonatomic, strong) NSMutableDictionary *selectorNamesToSubclassTrackers;
 - (void)addSubclassTracker:(AspectTracker *)subclassTracker hookingSelectorName:(NSString *)selectorName;
 - (void)removeSubclassTracker:(AspectTracker *)subclassTracker hookingSelectorName:(NSString *)selectorName;
@@ -108,6 +111,7 @@ typedef struct _AspectBlock {
 - (NSSet *)subclassTrackersHookingSelectorName:(NSString *)selectorName;
 @end
 
+//  给NSInvocation添加分类，用来获取所有参数
 @interface NSInvocation (Aspects)
 - (NSArray *)aspects_arguments;
 @end
@@ -254,13 +258,14 @@ static BOOL aspect_isCompatibleBlockSignature(NSMethodSignature *blockSignature,
     /*
      Unlike a typical method signature，a block type signature has no self ('@') or _cmd (':') parameter，but instead just one parameter for the block itself ('@?')。
      在一般的方法签名中 block 的类型签名是没有 self ('@') 或者 _cmd (':') 的，只有一个参数代表 block 自己 ('@?').
-     
+     所以Method签名的前两个参数编码固定为'@'和':'
+     block签名的第一个参数固定为'@？'
      */
     if (blockSignature.numberOfArguments > methodSignature.numberOfArguments) {
         signaturesMatch = NO;
     }else {
         if (blockSignature.numberOfArguments > 1) {
-            //  按照作者规定，如果block有参数，则第一个必须为id<AspectInfo>,对应编码为@，如果不是则说明不是要求的block
+            //  按照作者规定，如果block有参数，则第一个必须为id<AspectInfo>,对应编码为@，如果不是则说明不是要求的block,此处会直接校验不通过
             const char *blockType = [blockSignature getArgumentTypeAtIndex:1];
             if (blockType[0] != '@') {
                 signaturesMatch = NO;
@@ -268,7 +273,7 @@ static BOOL aspect_isCompatibleBlockSignature(NSMethodSignature *blockSignature,
         }
         
         //  argument[0]是self/block，argument[1]是SEL/id<AspectInfo>，固从argument[2]开始比较
-        //  block的参数量是可以少于Hook方法的参数量
+        //  block的参数量是可以少于Hook方法的参数量，但每个位置类型必须相同
         if (signaturesMatch) {
             for (NSUInteger idx = 2; idx < blockSignature.numberOfArguments; idx++) {
                 const char *methodType = [methodSignature getArgumentTypeAtIndex:idx];
@@ -543,6 +548,7 @@ static void __ASPECTS_ARE_BEING_CALLED__(__unsafe_unretained NSObject *self, SEL
     AspectsContainer *objectContainer = objc_getAssociatedObject(self, aliasSelector);
     AspectsContainer *classContainer = aspect_getContainerForClass(object_getClass(self), aliasSelector);
     AspectInfo *info = [[AspectInfo alloc] initWithInstance:self invocation:invocation];
+    NSArray *args = info.arguments;
     NSArray *aspectsToRemove = nil;
 
     // Before hooks.
@@ -686,7 +692,7 @@ static BOOL aspect_isSelectorAllowedAndTrack(NSObject *self, SEL selector, Aspec
             }
         } while ((currentClass = class_getSuperclass(currentClass)));
         //  以上都通过则表明该方法在类对象中(包括其父类、子类)从未被Hook过
-        //  使用AspectTracker记录Hook信息到继承链中的每一个类里
+        //  使用该类的AspectTracker记录Hook信息，并将AspectTracker标记到其所有集成父类的AspectTracker的selectorNamesToSubclassTrackers中
         currentClass = klass;
         AspectTracker *subclassTracker = nil;
         do {
@@ -764,6 +770,7 @@ static void aspect_deregisterTrackedSelector(id self, SEL selector) {
         [self.selectorNamesToSubclassTrackers removeObjectForKey:selectorName];
     }
 }
+//  subclassTrackersHookingSelectorName方法是一个并查集，传入一个selectorName，通过递归查找，找到所有包含这个selectorName的set，最后把这些set合并在一起作为返回值返回。
 - (NSSet *)subclassTrackersHookingSelectorName:(NSString *)selectorName {
     NSMutableSet *hookingSubclassTrackers = [NSMutableSet new];
     for (AspectTracker *tracker in self.selectorNamesToSubclassTrackers[selectorName]) {
@@ -793,9 +800,11 @@ static void aspect_deregisterTrackedSelector(id self, SEL selector) {
 - (id)aspect_argumentAtIndex:(NSUInteger)index {
 	const char *argType = [self.methodSignature getArgumentTypeAtIndex:index];
 	// Skip const type qualifier.
+    //  过滤const限定符
 	if (argType[0] == _C_CONST) argType++;
-
+//  该宏是用于取出对应位置的参数值
 #define WRAP_AND_RETURN(type) do { type val = 0; [self getArgument:&val atIndex:(NSInteger)index]; return @(val); } while (0)
+    //  这一大段判断用于用判断入参的基本类型，然后将值返回
 	if (strcmp(argType, @encode(id)) == 0 || strcmp(argType, @encode(Class)) == 0) {
 		__autoreleasing id returnObj;
 		[self getArgument:&returnObj atIndex:(NSInteger)index];
@@ -858,6 +867,7 @@ static void aspect_deregisterTrackedSelector(id self, SEL selector) {
 
 - (NSArray *)aspects_arguments {
 	NSMutableArray *argumentsArray = [NSMutableArray array];
+    //  0和1位分别为@和？，固从2开始取入参
 	for (NSUInteger idx = 2; idx < self.methodSignature.numberOfArguments; idx++) {
 		[argumentsArray addObject:[self aspect_argumentAtIndex:idx] ?: NSNull.null];
 	}
@@ -911,7 +921,8 @@ static void aspect_deregisterTrackedSelector(id self, SEL selector) {
     }
 
     // The `self` of the block will be the AspectInfo. Optional.
-    //  
+    //  按照约定，如果block有参数，除了自身外的第一个参数为AspectInfo，之后才是方法的参数
+    //  没有参数则无需处理
     if (numberOfArguments > 1) {
         [blockInvocation setArgument:&info atIndex:1];
     }
@@ -931,6 +942,7 @@ static void aspect_deregisterTrackedSelector(id self, SEL selector) {
 		[blockInvocation setArgument:argBuf atIndex:idx];
     }
     
+    //  触发block调用
     [blockInvocation invokeWithTarget:self.block];
     
     if (argBuf != NULL) {
