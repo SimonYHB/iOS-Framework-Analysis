@@ -45,6 +45,7 @@ typedef NS_OPTIONS(NSUInteger, AspectOptions) {
 
  Adding aspects returns an opaque token which can be used to deregister again. All calls are thread safe.
  */
+/// 注释说明Aspects利用消息转发机制l来Hook消息，是存在性能开销的，不要在频繁调用的方法里去使用Aspects，主要用在view/controller的代码中
 @interface NSObject (Aspects)
 
 /// 在调用指定类的某个方法之前/过程中/之后执行一段block代码
