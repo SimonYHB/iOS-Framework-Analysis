@@ -126,6 +126,7 @@ AspectLogError(@"Aspects: %@", errorDescription); \
 if (error) { *error = [NSError errorWithDomain:AspectErrorDomain code:errorCode userInfo:@{NSLocalizedDescriptionKey: errorDescription}]; }}while(0)
 
 NSString *const AspectErrorDomain = @"AspectErrorDomain";
+//  用于给实例对象创建子类时命名使用
 static NSString *const AspectsSubclassSuffix = @"_Aspects_";
 static NSString *const AspectsMessagePrefix = @"aspects_";
 
