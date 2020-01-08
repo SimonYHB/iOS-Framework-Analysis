@@ -186,9 +186,11 @@ static BOOL aspect_remove(AspectIdentifier *aspect, NSError **error) {
     aspect_performLocked(^{
         id self = aspect.object; // strongify
         if (self) {
+            //  通过objc_getAssociatedObject获取self对应key为(aspect的SEL)的容器
             AspectsContainer *aspectContainer = aspect_getContainerForObject(self, aspect.selector);
+            //  从container移除aspect
             success = [aspectContainer removeAspect:aspect];
-
+            //  清除Hooked操作创建的子类和Swizz的方法
             aspect_cleanupHookedClassAndSelector(self, aspect.selector);
             // destroy token
             aspect.object = nil;
@@ -366,13 +368,14 @@ static void aspect_cleanupHookedClassAndSelector(NSObject *self, SEL selector) {
     NSCParameterAssert(self);
     NSCParameterAssert(selector);
 
+    //  判断是实例对象还是类对象，若是类对象则取自身的类
 	Class klass = object_getClass(self);
     BOOL isMetaClass = class_isMetaClass(klass);
     if (isMetaClass) {
         klass = (Class)self;
     }
 
-    // Check if the method is marked as forwarded and undo that.
+    //  解除方法交换，还原成原先方法的实现
     Method targetMethod = class_getInstanceMethod(klass, selector);
     IMP targetMethodIMP = method_getImplementation(targetMethod);
     if (aspect_isMsgForwardIMP(targetMethodIMP)) {
@@ -387,18 +390,24 @@ static void aspect_cleanupHookedClassAndSelector(NSObject *self, SEL selector) {
         AspectLog(@"Aspects: Removed hook for -[%@ %@].", klass, NSStringFromSelector(selector));
     }
 
-    // Deregister global tracked selector
+    //  移除AspectTracker对应的记录(实例对象无需处理)
     aspect_deregisterTrackedSelector(self, selector);
 
-    // Get the aspect container and check if there are any hooks remaining. Clean up if there are not.
+    
+    //  移除container
     AspectsContainer *container = aspect_getContainerForObject(self, selector);
     if (!container.hasAspects) {
         // Destroy the container
         aspect_destroyContainerForObject(self, selector);
 
         // Figure out how the class was modified to undo the changes.
+        /*
+         情况1. 被hook的是普通实例对象 : 此时需要把对象的isa指向还原会为原来的Class --> object_setClass(self, originalClass);
+         情况2. 被hook的是类： 还原forwardInvocation:方法的IMP指向为原来的进入消息转发的IMP，并且从全局变量swizzledClasses中移除类名字符串的记录。
+         */
         NSString *className = NSStringFromClass(klass);
         if ([className hasSuffix:AspectsSubclassSuffix]) {
+            //  还原被hook的实例对象的isa的指向
             Class originalClass = NSClassFromString([className stringByReplacingOccurrencesOfString:AspectsSubclassSuffix withString:@""]);
             NSCAssert(originalClass != nil, @"Original class must exist");
             object_setClass(self, originalClass);
@@ -409,6 +418,7 @@ static void aspect_cleanupHookedClassAndSelector(NSObject *self, SEL selector) {
             //objc_disposeClassPair(object.class);
         }else {
             // Class is most likely swizzled in place. Undo that.
+            //  还原被hook Class的forwardInvocation:方法的IMP指向
             if (isMetaClass) {
                 aspect_undoSwizzleClassInPlace((Class)self);
             }else if (self.class != klass) {
@@ -476,6 +486,7 @@ static Class aspect_hookClass(NSObject *self, NSError **error) {
 	return subclass;
 }
 
+//  用于类对象交换原先的forwardInvocat方法ion:fang
 static NSString *const AspectsForwardInvocationSelectorName = @"__aspects_forwardInvocation:";
 static void aspect_swizzleForwardInvocation(Class klass) {
     NSCParameterAssert(klass);
@@ -560,7 +571,8 @@ for (AspectIdentifier *aspect in aspects) {\
     } \
 }
 
-// This is the swizzled forwardInvocation: method.
+
+//  交换后的__aspects_forwardInvocation:方法实现
 static void __ASPECTS_ARE_BEING_CALLED__(__unsafe_unretained NSObject *self, SEL selector, NSInvocation *invocation) {
     NSCParameterAssert(self);
     NSCParameterAssert(invocation);
