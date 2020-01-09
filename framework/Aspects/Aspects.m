@@ -456,7 +456,7 @@ static Class aspect_hookClass(NSObject *self, NSError **error) {
         return aspect_swizzleClassInPlace(baseClass);
     }
 
-    //  上述情况都不满足，则说明是示例对象
+    //  上述情况都不满足，则说明是实例对象
     //  采用动态创建子类向其注入方法，最后替换实例对象的isa指针使其指向新创建的子类来实现Aspects
     
     //  拼接_Aspects_后缀成新类名
@@ -478,7 +478,7 @@ static Class aspect_hookClass(NSObject *self, NSError **error) {
 		aspect_hookedGetClass(subclass, statedClass);
         //  改写subclass.isa的.class方法，使其返回self.class
 		aspect_hookedGetClass(object_getClass(subclass), statedClass);
-        //  注册鞋类
+        //  注册子类
 		objc_registerClassPair(subclass);
 	}
     //  更改isa指针
