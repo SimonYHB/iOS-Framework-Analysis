@@ -37,6 +37,75 @@ AOP(Aspect-oriented programming) 也称之为 “面向切面编程”, 是一�
            ​
 
 ## 具体实现
+### AspectInfo<AspectInfo>
+```
+/// The AspectInfo protocol is the first parameter of our block syntax.
+/// 主要是所Hook方法的信息，用于校验block兼容性，后续触发block时会作为block的首个参数
+@protocol AspectInfo <NSObject>
+/// The instance that is currently hooked.
+- (id)instance;
+/// The original invocation of the hooked method.
+- (NSInvocation *)originalInvocation;
+/// All method arguments, boxed. This is lazily evaluated.
+- (NSArray *)arguments;
+@end
+
+//  Aspecth的环境，包含被Hook的实例、调用方法和参数
+//  遵守AspectInfo协议
+@interface AspectInfo : NSObject <AspectInfo>
+- (id)initWithInstance:(__unsafe_unretained id)instance invocation:(NSInvocation *)invocation;
+@property (nonatomic, unsafe_unretained, readonly) id instance;
+@property (nonatomic, strong, readonly) NSArray *arguments;
+@property (nonatomic, strong, readonly) NSInvocation *originalInvocation;
+@end
+```
+### AspectIdentifier<AspectToken>
+### AspectsContainer
+### AspectTracker
+### 全局变量
+Aspects内部有定义一些全局变量和常量。   
+
+- `static NSMutableDictionary *swizzledClassesDict; `    
+swizzledClassesDict是一个MutableDictionary，内部每个元素key为Class，value为AspectTracker，记录所有被Aspects混写过的Class的继承链追踪记录信息，用于判断某个方法是否在类的继承链中有无被混写过。
+
+```
+static NSMutableDictionary *aspect_getSwizzledClassesDict() {
+    //  用于记录所有被混写过的类 <Class : AspectTracker *>
+    static NSMutableDictionary *swizzledClassesDict;
+    static dispatch_once_t pred;
+    dispatch_once(&pred, ^{
+        swizzledClassesDict = [NSMutableDictionary new];
+    });
+    return swizzledClassesDict;
+}
+```
+- `static NSMutableSet *swizzledClasses;`  
+swizzledClasses是一个Set集合，内部存放的是被改写过`forwardInvocation:`方法的类名。
+
+```
+static void _aspect_modifySwizzledClasses(void (^block)(NSMutableSet *swizzledClasses)) {
+    //  用于记录所有被混写过的类名，(className)
+    static NSMutableSet *swizzledClasses;
+    static dispatch_once_t pred;
+    dispatch_once(&pred, ^{
+        swizzledClasses = [NSMutableSet new];
+    });
+    @synchronized(swizzledClasses) {
+        block(swizzledClasses);
+    }
+}
+```
+- 常量: AspectsSubclassSuffix、AspectsMessagePrefix、AspectsForwardInvocationSelectorName等，用于内部规范命名。
+
+```
+static NSString *const AspectsSubclassSuffix = @"_Aspects_";
+static NSString *const AspectsMessagePrefix = @"aspects_";
+static NSString *const AspectsForwardInvocationSelectorName = @"__aspects_forwardInvocation:";
+```
+
+
+### 关键方法解析
+
 # Stinger
 ## 整体流程
 ## 具体实现

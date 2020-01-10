@@ -350,13 +350,13 @@ static void aspect_prepareClassAndHookSelector(NSObject *self, SEL selector, NSE
     if (!aspect_isMsgForwardIMP(targetMethodIMP)) {
         // Make a method alias for the existing method implementation, it not already copied.
         const char *typeEncoding = method_getTypeEncoding(targetMethod);
+        //- 创建新的方法aspects_xxxx，方法的实现为原方法的实现，目的是保存原来方法的实现
         SEL aliasSelector = aspect_aliasForSelector(selector);
-        //- 若子类里面不能响应selector，就为该子类添加aspects_xxxx方法，方法的实现为原生方法的实现
         if (![klass instancesRespondToSelector:aliasSelector]) {
             __unused BOOL addedAlias = class_addMethod(klass, aliasSelector, method_getImplementation(targetMethod), typeEncoding);
             NSCAssert(addedAlias, @"Original implementation for %@ is already copied to %@ on %@", NSStringFromSelector(selector), NSStringFromSelector(aliasSelector), klass);
         }
-        //- 将selector实现替换为_objc_msgForward或_objc_msgForward_stret形式触发,从而使调用时能进入消息转发机制forwardInvocation
+        //- 修改原方法的实现，将其替换为_objc_msgForward或_objc_msgForward_stret形式触发,从而使调用时能进入消息转发机制forwardInvocation
         // We use forwardInvocation to hook in.
         class_replaceMethod(klass, selector, aspect_getMsgForwardIMP(self, selector), typeEncoding);
         AspectLog(@"Aspects: Installed hook for -[%@ %@].", klass, NSStringFromSelector(selector));
@@ -486,7 +486,7 @@ static Class aspect_hookClass(NSObject *self, NSError **error) {
 	return subclass;
 }
 
-//  用于类对象交换原先的forwardInvocat方法ion:fang
+//  用于类对象交换原先的forwardInvocat方法名
 static NSString *const AspectsForwardInvocationSelectorName = @"__aspects_forwardInvocation:";
 static void aspect_swizzleForwardInvocation(Class klass) {
     NSCParameterAssert(klass);
@@ -726,7 +726,7 @@ static BOOL aspect_isSelectorAllowedAndTrack(NSObject *self, SEL selector, Aspec
             }
         } while ((currentClass = class_getSuperclass(currentClass)));
         //  以上都通过则表明该方法在类对象中(包括其父类、子类)从未被Hook过
-        //  使用该类的AspectTracker记录Hook信息，并将AspectTracker标记到其所有集成父类的AspectTracker的selectorNamesToSubclassTrackers中
+        //  使用该类的AspectTracker记录Hook信息，并将AspectTracker添加到SuperClass的AspectTracker的selectorNamesToSubclassTrackers中
         currentClass = klass;
         AspectTracker *subclassTracker = nil;
         do {
