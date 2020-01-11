@@ -105,7 +105,8 @@ static NSString *const AspectsForwardInvocationSelectorName = @"__aspects_forwar
 
 
 ### 关键方法解析
-
+- `aspect_hookClass`
+- `aspect_cleanupHookedClassAndSelector`
 # Stinger
 ## 整体流程
 ## 具体实现
