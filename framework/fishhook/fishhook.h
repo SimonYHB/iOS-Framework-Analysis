@@ -42,9 +42,9 @@ extern "C" {
  * name to its replacement
  */
 struct rebinding {
-  const char *name;
-  void *replacement;
-  void **replaced;
+  const char *name; // 被hook的函数名
+  void *replacement;  // 替换的函数指针(IMP)
+  void **replaced;  // 用于存放原函数指针的指针(成功替换后会将原函数指针放入其中)
 };
 
 /*
