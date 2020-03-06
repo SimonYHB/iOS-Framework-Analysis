@@ -62,10 +62,11 @@ struct rebindings_entry {
 };
 
 static struct rebindings_entry *_rebindings_head;
-
+// 绑定的前置动作，将rebindings放到私有的rebindings_header头部
 static int prepend_rebindings(struct rebindings_entry **rebindings_head,
                               struct rebinding rebindings[],
                               size_t nel) {
+  // 创建rebindings_entry节点
   struct rebindings_entry *new_entry = (struct rebindings_entry *) malloc(sizeof(struct rebindings_entry));
   if (!new_entry) {
     return -1;
@@ -105,7 +106,7 @@ static vm_prot_t get_protection(void *sectionStart) {
   }
 }
 
-// 根据nl_symbol_ptr/la_symbol_ptr数据段，依次遍历这个数据段的符号名（指针对应的符号名），跟传入的符号名进行匹配时候，进行替换。
+// 根据传入的nl_symbol_ptr/la_symbol_ptr数据段，遍历该数据段的符号，找到其对应的符号名并与传入的符号名进行匹配，命中则进行替换。
 static void perform_rebinding_with_section(struct rebindings_entry *rebindings,
                                            section_t *section,
                                            intptr_t slide,
@@ -116,24 +117,27 @@ static void perform_rebinding_with_section(struct rebindings_entry *rebindings,
   const bool isDataConst = strcmp(section->segname, "__DATA_CONST") == 0;
   // 符号表访问指针地址替换
   // `nl_symbol_ptr`和`la_symbol_ptr`section中的`reserved1`字段指明对应在`indirect symbol table`起始的index
-  //动态符号表中第一个解析的符号的起始地址
+  //  获得该section符号表的起始地址
   uint32_t *indirect_symbol_indices = indirect_symtab + section->reserved1;
+  // 得到该section段的所有函数实现地址
   void **indirect_symbol_bindings = (void **)((uintptr_t)slide + section->addr);
   vm_prot_t oldProtection = VM_PROT_READ;
   if (isDataConst) {
     oldProtection = get_protection(rebindings);
+    // protect()函数可以用来修改一段指定内存区域的保护属性。
+    // 这里暂时将常量区权限改成可读可写
     mprotect(indirect_symbol_bindings, section->size, PROT_READ | PROT_WRITE);
   }
   for (uint i = 0; i < section->size / sizeof(void *); i++) {
-    // 符号表的index
+    // 从符号表中取得符号
     uint32_t symtab_index = indirect_symbol_indices[i];
     if (symtab_index == INDIRECT_SYMBOL_ABS || symtab_index == INDIRECT_SYMBOL_LOCAL ||
         symtab_index == (INDIRECT_SYMBOL_LOCAL   | INDIRECT_SYMBOL_ABS)) {
       continue;
     }
-    //获取每一个需要动态解析的符号在符号表中的偏移量
+    // 获取每一个需要动态解析的符号在符号表中的偏移量
     uint32_t strtab_offset = symtab[symtab_index].n_un.n_strx;
-    //通过字符串表偏移量获取符号对应的字符串（符号的名字）
+    // 通过字符串表偏移量获取符号对应的字符串（符号的名字）
     char *symbol_name = strtab + strtab_offset;
     bool symbol_name_longer_than_1 = symbol_name[0] && symbol_name[1];
     // 遍历rebindings数组，比较符号，相同则进行替换
@@ -147,6 +151,7 @@ static void perform_rebinding_with_section(struct rebindings_entry *rebindings,
               indirect_symbol_bindings[i] != cur->rebindings[j].replacement) {
             *(cur->rebindings[j].replaced) = indirect_symbol_bindings[i];
           }
+          // 更改函数为新的实现
           indirect_symbol_bindings[i] = cur->rebindings[j].replacement;
           goto symbol_loop;
         }
@@ -155,10 +160,11 @@ static void perform_rebinding_with_section(struct rebindings_entry *rebindings,
     }
   symbol_loop:;
   }
+  // 恢复常量区的访问权限
   if (isDataConst) {
     int protection = 0;
     if (oldProtection & VM_PROT_READ) {
-      protection |= PROT_READ;
+      protection |= PROT_READ;  // 按位或后赋值
     }
     if (oldProtection & VM_PROT_WRITE) {
       protection |= PROT_WRITE;
@@ -175,7 +181,7 @@ static void perform_rebinding_with_section(struct rebindings_entry *rebindings,
  为什么要找nl_symbol_ptr(got)/la_symbol_ptr？
  __nl_symbol_ptr    非懒加载指针表
  __la_symbol_ptr    懒加载指针表，符号第一次调用时通过 dyld 中的 dyld_stub_binder进行加载到表中
- 这两个表是_DATA中跟动态符号链接相关的部分，所以需要找到这两个部分去替换链接方法
+ 这两个表是_DATA中跟动态符号链接相关的部分，所以需要找到原方法这两个部分的指针去替换链接方法
  对于动态链接库里面的C函数，第一次调用的时候，我们会得到函数和实现地址的对应关系，函数的实现地址存放在一个叫la_symbol_ptr的地方，第二次调用的时候，直接通过la_symbol_ptr找到函数地址就可以，不再需要繁琐的获取函数地址的过程。
  */
 static void rebind_symbols_for_image(struct rebindings_entry *rebindings,
@@ -191,8 +197,8 @@ static void rebind_symbols_for_image(struct rebindings_entry *rebindings,
   struct symtab_command* symtab_cmd = NULL; //符号表
   struct dysymtab_command* dysymtab_cmd = NULL; //间接符号表
   //1. 遍历加载命令，获得MachO中LINKEDIT、符号表、间接符号表三个加载命令
-  // 要去寻找load command，所以这里先跳过sizeof(mach_header_t)大小
   // 每个mach-o由(header、load commands、 data)三块区域组成
+  // 要去寻找load command，所以这里先跳过sizeof(mach_header_t)大小
   uintptr_t cur = (uintptr_t)header + sizeof(mach_header_t);
   for (uint i = 0; i < header->ncmds; i++, cur += cur_seg_cmd->cmdsize) {
     cur_seg_cmd = (segment_command_t *)cur;
@@ -200,8 +206,8 @@ static void rebind_symbols_for_image(struct rebindings_entry *rebindings,
   /*
    LC_SEGMENT_64 含有为动态链接库使用的原始数据
    LC_SYMTAB(符号地址)这个LoadCommand主要提供了两个信息
-   Symbol Table的偏移量与Symbol Table中元素的个数
-   String Table的偏移量与String Table的长度
+      Symbol Table(符号表)的偏移量与Symbol Table中元素的个数
+      String Table(字符串表)的偏移量与String Table的长度
    LC_DYSYMTAB(动态符号表地址)提供了动态符号表的位移和元素个数，还有一些其他的表格索引
    */
     if (cur_seg_cmd->cmd == LC_SEGMENT_ARCH_DEPENDENT) {
@@ -222,7 +228,7 @@ static void rebind_symbols_for_image(struct rebindings_entry *rebindings,
 
   // 找到 base 符号表的地址
   // 本来是：基址=linkedit内存地址 - linkedit的fileoff
-  //由于ASLR：真实基址 = linkedit内存地址(vmaddr) + slide - fileoff
+  // 由于ASLR：真实基址 = linkedit内存地址(vmaddr) + slide - fileoff
   uintptr_t linkedit_base = (uintptr_t)slide + linkedit_segment->vmaddr - linkedit_segment->fileoff;
   //符号表的地址 = 基址 + 符号表偏移量
   nlist_t *symtab = (nlist_t *)(linkedit_base + symtab_cmd->symoff);
@@ -231,8 +237,7 @@ static void rebind_symbols_for_image(struct rebindings_entry *rebindings,
   //动态符号表地址 = 基址 + 动态符号表偏移量
   uint32_t *indirect_symtab = (uint32_t *)(linkedit_base + dysymtab_cmd->indirectsymoff);
     
-  //2. 遍历加载命令，得到DATA，然后遍历DATA里面的section，
-  //找到nl_symbol_ptr(got)/la_symbol_ptr
+  //2. 遍历加载命令，得到DATA，然后遍历DATA里面的section，找到nl_symbol_ptr(got)/la_symbol_ptr
   cur = (uintptr_t)header + sizeof(mach_header_t);
   for (uint i = 0; i < header->ncmds; i++, cur += cur_seg_cmd->cmdsize) {
     cur_seg_cmd = (segment_command_t *)cur;

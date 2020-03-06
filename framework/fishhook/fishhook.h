@@ -56,6 +56,7 @@ struct rebinding {
  * is rebound more than once, the later rebinding will take precedence.
  */
 FISHHOOK_VISIBILITY
+// 参数分别是结构体rebinding数组和数组元素个数
 int rebind_symbols(struct rebinding rebindings[], size_t rebindings_nel);
 
 /*
@@ -63,6 +64,7 @@ int rebind_symbols(struct rebinding rebindings[], size_t rebindings_nel);
  * to the mach-o header, the slide should be the slide offset. Others as above.
  */
 FISHHOOK_VISIBILITY
+// 在指定的image中进行替换，header为该镜像的header，slider为偏移量，其他如上。
 int rebind_symbols_image(void *header,
                          intptr_t slide,
                          struct rebinding rebindings[],
