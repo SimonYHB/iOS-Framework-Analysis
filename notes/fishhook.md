@@ -1,6 +1,6 @@
 
 
-> 本篇是笔者解读源码项目 [iOS-Framework-Analysis](https://github.com/SimonYHB/iOS-Framework-Analysis) 的开篇，今年计划完成10个优秀第三方源码解读，欢迎star和笔者一起解读这些优秀框架的背后思想，从而提升自己的内功。该篇详细的源码注释已上传 [fishhook源码注释](https://github.com/SimonYHB/iOS-Framework-Analysis/tree/master/framework/fishhook)，如有需要请自取🎉。
+> 本篇是笔者解读源码项目 [iOS-Framework-Analysis](https://github.com/SimonYHB/iOS-Framework-Analysis) 的开篇，今年计划完成10个优秀第三方源码解读，欢迎star和笔者一起解读这些优秀框架的背后思想，从而提升自己的内功。该篇详细的源码注释已上传 [fishhook源码注释](https://github.com/SimonYHB/iOS-Framework-Analysis/tree/master/framework/fishhook)，如有需要请自取 🐝🐝。
 
 在iOS平台下，说起Hook首先会想起`MethodSwizzling`这个苹果提供的工具，利用Objective-C的Runtime的特性，通过在消息转发时交换方法实现（IMP）的机会。但MethodSwizzling只能对Objective-C方法进行Hook，如果要对C/C++方法进行Hook操作，可以使用facebook提供的`fishhook`框架，本文是对该框架的解读。
 
@@ -9,8 +9,9 @@
 
 Mach-O:  在iOS和OS X系统下，所有可执行文件、dylib 以及 Bundle都是Mach-O格式。主要有*Header*、*Load Commands*和*Data*组成。
 
-![](https://user-gold-cdn.xitu.io/2020/3/6/170af6d09c29b314?w=1000&h=502&f=png&s=174471)
-Mach-O的具体结构(看看就好，后面有部清楚的再回头找)：
+![](/images/fishhook_0.png)
+Mach-O的具体结构(看看就好，后面有不清楚的再回头找)：
+
 ```
 // header
 struct mach_header {
@@ -457,7 +458,7 @@ fishhook也有其局限性，由于是依赖 Mach-O 的动态绑定机制实现�
 
 
 
-![找到符号名称](https://user-gold-cdn.xitu.io/2020/3/6/170af6db6304b536?w=708&h=912&f=png&s=100624)
+![](/images/fishhook_1.png)
 
 
 **参考链接:**  
@@ -466,5 +467,6 @@ fishhook也有其局限性，由于是依赖 Mach-O 的动态绑定机制实现�
 [趣探 Mach-O：FishHook 解析](https://juejin.im/post/5a0c5c5e51882555cc416602)
 
 
-## Find Me 👇  
-wechat:  **yhbxcq**
+## About Me 👇  
+
+### 🐝 微信:  **yhbxcq**
