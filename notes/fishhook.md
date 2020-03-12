@@ -9,7 +9,7 @@
 
 Mach-O:  在iOS和OS X系统下，所有可执行文件、dylib 以及 Bundle都是Mach-O格式。主要有*Header*、*Load Commands*和*Data*组成。
 
-![](/images/fishhook_0.png)
+![](/notes/images/fishhook_0.png)
 Mach-O的具体结构(看看就好，后面有不清楚的再回头找)：
 
 ```
@@ -458,7 +458,7 @@ fishhook也有其局限性，由于是依赖 Mach-O 的动态绑定机制实现�
 
 
 
-![](/images/fishhook_1.png)
+![](/notes/images/fishhook_1.png)
 
 
 **参考链接:**  
