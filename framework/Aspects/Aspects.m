@@ -78,7 +78,7 @@ typedef struct _AspectBlock {
 @end
 
 //  Aspect标识，包含一次完整Aspect的所有内容
-//  内部实现了remove方法，锐欧需要使用遵守AspectToken即可
+//  内部实现了remove方法，需要使用遵守AspectToken即可
 @interface AspectIdentifier : NSObject
 + (instancetype)identifierWithSelector:(SEL)selector object:(id)object options:(AspectOptions)options block:(id)block error:(NSError **)error;
 - (BOOL)invokeWithInfo:(id<AspectInfo>)info;
