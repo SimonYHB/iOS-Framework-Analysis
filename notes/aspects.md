@@ -1,4 +1,4 @@
-> 本篇是笔者解读源码项目 [iOS-Framework-Analysis](https://github.com/SimonYHB/iOS-Framework-Analysis) 的第二遍，今年计划完成10个优秀第三方源码解读，欢迎 star 和笔者一起解读这些优秀框架的背后思想。该篇详细的源码注释已上传 [Aspects源码注释](https://github.com/SimonYHB/iOS-Framework-Analysis/tree/master/framework/Aspects)，如有需要请自取，若有什么不足之处，敬请告知  🐝🐝。
+> 本篇是笔者解读源码项目 [iOS-Framework-Analysis](https://github.com/SimonYHB/iOS-Framework-Analysis) 的第二遍，今年计划完成10个优秀第三方框架解读，欢迎 star 和笔者一起解读这些优秀框架的背后思想。该篇详细的源码注释已上传 [Aspects源码注释](https://github.com/SimonYHB/iOS-Framework-Analysis/tree/master/framework/Aspects)，如有需要请自取，若有什么不足之处，敬请告知  🐝🐝。
 
 # 前言
 
@@ -93,13 +93,133 @@ extern NSString *const AspectErrorDomain;
 
 ### AspectInfo
 
+```objective-c
+@interface AspectInfo : NSObject <AspectInfo>
+- (id)initWithInstance:(__unsafe_unretained id)instance invocation:(NSInvocation *)invocation;
+@property (nonatomic, unsafe_unretained, readonly) id instance;
+@property (nonatomic, strong, readonly) NSArray *arguments;
+@property (nonatomic, strong, readonly) NSInvocation *originalInvocation;
+@end
+```
+
+Aspects 对象的环境，包含被 Hook 的实例、调用方法和参数，并遵守AspectInfo 协议。
+
 ### AspectIdentifier
+
+```objective-c
+@interface AspectIdentifier : NSObject
++ (instancetype)identifierWithSelector:(SEL)selector object:(id)object options:(AspectOptions)options block:(id)block error:(NSError **)error;
+- (BOOL)invokeWithInfo:(id<AspectInfo>)info;
+@property (nonatomic, assign) SEL selector;
+@property (nonatomic, strong) id block;
+@property (nonatomic, strong) NSMethodSignature *blockSignature;
+@property (nonatomic, weak) id object;
+@property (nonatomic, assign) AspectOptions options;
+@end
+```
+
+Aspect 标识，包含一次完整 Aspect 的所有内容，会作为block 第一个参数，内部实现了remove方法，需要使用时遵守 AspectToken 协议即可。
 
 ### AspectsContainer
 
+```objective-c
+@interface AspectsContainer : NSObject
+- (void)addAspect:(AspectIdentifier *)aspect withOptions:(AspectOptions)injectPosition;
+- (BOOL)removeAspect:(id)aspect;
+- (BOOL)hasAspects;
+@property (atomic, copy) NSArray *beforeAspects;
+@property (atomic, copy) NSArray *insteadAspects;
+@property (atomic, copy) NSArray *afterAspects;
+@end
+```
+
+AspectsContainer 是一个对象或者类的所有的 Aspects 的容器，每次注入Aspects时会将其按照 option 里的时机放到对应数组中，方便后续的统一管理(例如移除)。
+
+通过 `objc_setAssociatedObject` 给 NSObject 注 AspectsContainer 属性，内部含有三个数组，对应关系如下。
+
+```objective-c
+NSArray *beforeAspects -> AspectPositionBefore
+
+NSArray *insteadAspects -> AspectPositionInstead
+
+NSArray *afterAspects -> AspectPositionAfter
+```
+
 ### AspectTracker
 
+```objective-c
+@interface AspectTracker : NSObject
+- (id)initWithTrackedClass:(Class)trackedClass;
+@property (nonatomic, strong) Class trackedClass;
+@property (nonatomic, readonly) NSString *trackedClassName;
+@property (nonatomic, strong) NSMutableSet *selectorNames;
+//用于标记其所有子类有Hook的方法 示例：[HookingSelectorName: (AspectTracker1,AspectTracker2...)]
+@property (nonatomic, strong) NSMutableDictionary *selectorNamesToSubclassTrackers;
+- (void)addSubclassTracker:(AspectTracker *)subclassTracker hookingSelectorName:(NSString *)selectorName;
+- (void)removeSubclassTracker:(AspectTracker *)subclassTracker hookingSelectorName:(NSString *)selectorName;
+- (BOOL)subclassHasHookedSelectorName:(NSString *)selectorName;
+- (NSSet *)subclassTrackersHookingSelectorName:(NSString *)selectorName;
+@end
+```
+
+每个被 Hook 过类都有一个对应 AspectTracker，以 `<Class : AspectTracker *>` 形式存储在 swizzledClassesDict 字典中，用于追踪记录类中 Hook 的方法。
+
 ### AspectBlockRef
+
+```objective-c
+typedef struct _AspectBlock {
+	__unused Class isa;
+	AspectBlockFlags flags;
+	__unused int reserved;
+	void (__unused *invoke)(struct _AspectBlock *block, ...);
+	struct {
+		unsigned long int reserved;
+		unsigned long int size;
+		// requires AspectBlockFlagsHasCopyDisposeHelpers
+		void (*copy)(void *dst, const void *src);
+		void (*dispose)(const void *);
+		// requires AspectBlockFlagsHasSignature
+		const char *signature;
+		const char *layout;
+	} *descriptor;
+	// imported variables
+} *AspectBlockRef;
+```
+
+内部定义的 block 结构体，用于转换外部 block ，与下面 block 源码定义很相似。
+
+```c
+ // 从block源码(libclosure)可知
+ struct Block_layout {
+ void *isa;
+ int flags;
+ int reserved;
+ void (*invoke)(void *, ...);
+ struct Block_descriptor *descriptor;
+
+};
+struct Block_descriptor {
+    unsigned long int reserved;
+    unsigned long int size;
+    void (*copy)(void *dst, void *src);
+    void (*dispose)(void *);
+};
+ // Values for Block_layout->flags to describe block objects
+ enum {
+ BLOCK_DEALLOCATING =      (0x0001),  // runtime
+ BLOCK_REFCOUNT_MASK =     (0xfffe),  // runtime
+ BLOCK_NEEDS_FREE =        (1 << 24), // runtime
+ BLOCK_HAS_COPY_DISPOSE =  (1 << 25), // compiler
+ BLOCK_HAS_CTOR =          (1 << 26), // compiler: helpers have C++ code
+ BLOCK_IS_GC =             (1 << 27), // runtime
+ BLOCK_IS_GLOBAL =         (1 << 28), // compiler
+ BLOCK_USE_STRET =         (1 << 29), // compiler: undefined if !BLOCK_HAS_SIGNATURE
+ BLOCK_HAS_SIGNATURE  =    (1 << 30), // compiler
+ BLOCK_HAS_EXTENDED_LAYOUT=(1 << 31)  // compiler
+ };
+```
+
+
 
 
 
@@ -107,11 +227,62 @@ extern NSString *const AspectErrorDomain;
 
 两个 API 的内部都是调用 `aspect_add` 函数，我们直接从该函数入手，看作者是如何设计实现的。
 
+```objective-c
+static id aspect_add(id self, SEL selector, AspectOptions options, id block, NSError **error) {
+    NSCParameterAssert(self);
+    NSCParameterAssert(selector);
+    NSCParameterAssert(block);
 
+    __block AspectIdentifier *identifier = nil;
+    aspect_performLocked(^{
+        //- 判断要混写的方法是否在白名单中
+        if (aspect_isSelectorAllowedAndTrack(self, selector, options, error)) {
+            //- 获取混写方法容器
+            AspectsContainer *aspectContainer = aspect_getContainerForObject(self, selector);
+            //- 创建方法标示
+            identifier = [AspectIdentifier identifierWithSelector:selector object:self options:options block:block error:error];
+            if (identifier) {
+                //- 根据标示将方法放在对应容器中
+                [aspectContainer addAspect:identifier withOptions:options];
+
+                // Modify the class to allow message interception.
+                //  **关键：真正实现Aspect的方法**
+                aspect_prepareClassAndHookSelector(self, selector, error);
+            }
+        }
+    });
+    return identifier;
+}
+```
+
+我们先用一张流程图画下都做了些什么事情。
+
+![aspects_0](/Users/yehuangbin/Desktop/github/iOS-Framework-Analysis/notes/images/aspects_0.jpg)
+
+### 前置准备步骤
+
+为了实现 Hook 注入，需要先做些准备工作，包括：
+
+- 校验当前方法是否可以被 Hook，例如 retain、release、 forwardInvocation 等方法都是禁止被 Hook 的。
+- 获取类中的 AspectsContainer 容器
+- 将方法信息等封装成 AspectIdentifier，其中有比较严格的参数兼容判断，具体可看 `aspect_isCompatibleBlockSignature` 函数
+- 将 AspectIdentifier 放入对应容器中
+
+实现都比较易懂，这里就不累述了，详细可看 [Aspects源码注释](https://github.com/SimonYHB/iOS-Framework-Analysis/tree/master/framework/Aspects)。
+
+### 关键实现**aspect_prepareClassAndHookSelector**
+
+
+
+
+
+### 移除aspect_remove
+
+移除的逻辑比较清晰，这里就用图描述下具体都做了什么。
+
+![aspects_1](/Users/yehuangbin/Desktop/github/iOS-Framework-Analysis/notes/images/aspects_1.jpg)
 
 # 总结
-
-## About Me
 
 
 
