@@ -272,6 +272,94 @@ static id aspect_add(id self, SEL selector, AspectOptions options, id block, NSE
 
 ### 关键实现**aspect_prepareClassAndHookSelector**
 
+```objective-c
+static void aspect_prepareClassAndHookSelector(NSObject *self, SEL selector, NSError **error) {
+    NSCParameterAssert(selector);
+    //- 传入self得到其指向的类
+    //- 如果是类对象则Hook其forwardInvocation方法,将Container内的方法混写进去，在将class/metaClass返回
+    //- 如果是示例对象，则通过动态创建子类的方式返回新创建的子类
+    Class klass = aspect_hookClass(self, error);
+    Method targetMethod = class_getInstanceMethod(klass, selector);
+    IMP targetMethodIMP = method_getImplementation(targetMethod);
+    //- 判断方法是否已经是走消息转发的形式，若不是则对其进行处理。
+    if (!aspect_isMsgForwardIMP(targetMethodIMP)) {
+        // Make a method alias for the existing method implementation, it not already copied.
+        const char *typeEncoding = method_getTypeEncoding(targetMethod);
+        //- 创建新的方法aspects_xxxx，方法的实现为原方法的实现，目的是保存原来方法的实现
+        SEL aliasSelector = aspect_aliasForSelector(selector);
+        if (![klass instancesRespondToSelector:aliasSelector]) {
+            __unused BOOL addedAlias = class_addMethod(klass, aliasSelector, method_getImplementation(targetMethod), typeEncoding);
+            NSCAssert(addedAlias, @"Original implementation for %@ is already copied to %@ on %@", NSStringFromSelector(selector), NSStringFromSelector(aliasSelector), klass);
+        }
+        //- 修改原方法的实现，将其替换为_objc_msgForward或_objc_msgForward_stret形式触发,从而使调用时能进入消息转发机制forwardInvocation
+        // We use forwardInvocation to hook in.
+        class_replaceMethod(klass, selector, aspect_getMsgForwardIMP(self, selector), typeEncoding);
+        AspectLog(@"Aspects: Installed hook for -[%@ %@].", klass, NSStringFromSelector(selector));
+    }
+}
+```
+
+
+
+### 获取目标类aspect_hookClass
+
+```objective-c
+static Class aspect_hookClass(NSObject *self, NSError **error) {
+    NSCParameterAssert(self);
+    /*
+     self.class:当self是实例对象的时候，返回的是类对象，否则则返回自身
+     object_getClass:获得的是isa的指针
+     当self是实例对象时，self.class和object_getClass(self)相同，都是指向其类
+     当self为类对象时，self.class是自身类，object_getClass(self)则是其metaClass
+     */
+	Class statedClass = self.class;
+	Class baseClass = object_getClass(self);
+
+	NSString *className = NSStringFromClass(baseClass);
+
+    //  判断是否已子类化过(类后缀为_Aspects_)
+	if ([className hasSuffix:AspectsSubclassSuffix]) {
+		return baseClass;
+
+        //  若self是类对象或元类对象，则混写self(替换forwardInvocation方法)
+	}else if (class_isMetaClass(baseClass)) {
+        return aspect_swizzleClassInPlace((Class)self);
+        //  statedClass！=baseClass，且不满足上述两个条件，则说明是KVO模式下的实例对象，要混写其metaClass
+    }else if (statedClass != baseClass) {
+        return aspect_swizzleClassInPlace(baseClass);
+    }
+
+    //  上述情况都不满足，则说明是实例对象
+    //  采用动态创建子类向其注入方法，最后替换实例对象的isa指针使其指向新创建的子类来实现Aspects
+    
+    //  拼接_Aspects_后缀成新类名
+	const char *subclassName = [className stringByAppendingString:AspectsSubclassSuffix].UTF8String;
+    //  尝试用新类名获取类
+	Class subclass = objc_getClass(subclassName);
+
+	if (subclass == nil) {
+        //  创建一个新类，并将原来的类作为其父类
+		subclass = objc_allocateClassPair(baseClass, subclassName, 0);
+		if (subclass == nil) {
+            NSString *errrorDesc = [NSString stringWithFormat:@"objc_allocateClassPair failed to allocate class %s.", subclassName];
+            AspectError(AspectErrorFailedToAllocateClassPair, errrorDesc);
+            return nil;
+        }
+        //  改写subclass的forwardInvocation方法，插入Aspects
+		aspect_swizzleForwardInvocation(subclass);
+        //  改写subclass的.class方法，使其返回self.class
+		aspect_hookedGetClass(subclass, statedClass);
+        //  改写subclass.isa的.class方法，使其返回self.class
+		aspect_hookedGetClass(object_getClass(subclass), statedClass);
+        //  注册子类
+		objc_registerClassPair(subclass);
+	}
+    //  更改isa指针
+	object_setClass(self, subclass);
+	return subclass;
+}
+```
+
 
 
 
