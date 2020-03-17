@@ -1,0 +1,23 @@
+PODS:
+  - Aspects (1.4.1)
+  - Stinger (0.2.8)
+
+DEPENDENCIES:
+  - Aspects
+  - Stinger (from `../`)
+
+SPEC REPOS:
+  trunk:
+    - Aspects
+
+EXTERNAL SOURCES:
+  Stinger:
+    :path: "../"
+
+SPEC CHECKSUMS:
+  Aspects: 7595ba96a6727a58ebcbfc954497fc5d2fdde546
+  Stinger: b32ad54b685dabf5a301b17e4b1f930b60204b62
+
+PODFILE CHECKSUM: 6df52b616ee208569510c4defb2313f601db9f5e
+
+COCOAPODS: 1.8.4
