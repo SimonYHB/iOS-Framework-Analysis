@@ -1,4 +1,4 @@
-> 本篇是笔者解读源码项目 [iOS-Framework-Analysis](https://github.com/SimonYHB/iOS-Framework-Analysis) 的第二遍，今年计划完成10个优秀第三方框架解读，欢迎 star 和笔者一起解读这些优秀框架的背后思想。该篇详细的源码注释已上传 [Aspects源码注释](https://github.com/SimonYHB/iOS-Framework-Analysis/tree/master/framework/Aspects)，如有需要请自取，若有什么不足之处，敬请告知  🐝🐝。
+> 本篇是笔者解读源码项目 [iOS-Framework-Analysis](https://github.com/SimonYHB/iOS-Framework-Analysis) 的第二篇，今年计划完成10个优秀第三方框架解读，欢迎 star 和笔者一起解读这些优秀框架的背后思想。该篇详细的源码注释已上传 [Aspects源码注释](https://github.com/SimonYHB/iOS-Framework-Analysis/tree/master/framework/Aspects)，如有需要请自取，若有什么不足之处，敬请告知  🐝🐝。
 
 # 前言
 
@@ -270,13 +270,13 @@ static id aspect_add(id self, SEL selector, AspectOptions options, id block, NSE
 
 实现都比较易懂，这里就不累述了，详细可看 [Aspects源码注释](https://github.com/SimonYHB/iOS-Framework-Analysis/tree/master/framework/Aspects)。
 
-### 关键实现**aspect_prepareClassAndHookSelector**
+### 关键实现aspect_prepareClassAndHookSelector
 
 ```objective-c
 static void aspect_prepareClassAndHookSelector(NSObject *self, SEL selector, NSError **error) {
     NSCParameterAssert(selector);
     //- 传入self得到其指向的类
-    //- 如果是类对象则Hook其forwardInvocation方法,将Container内的方法混写进去，在将class/metaClass返回
+    //- 如果是类对象则Hook其forwardInvocation方法,将Container内的方法注入进去，在将class/metaClass返回
     //- 如果是示例对象，则通过动态创建子类的方式返回新创建的子类
     Class klass = aspect_hookClass(self, error);
     Method targetMethod = class_getInstanceMethod(klass, selector);
@@ -301,17 +301,14 @@ static void aspect_prepareClassAndHookSelector(NSObject *self, SEL selector, NSE
 
 
 
+首先通过 `aspect_hookClass` 获取目标类，并替换 `forwardInvocation`方法注入 Hook 代码，然后将原方法的实现替换为 _objc_msgForward 或 _objc_msgForward_stret 形式触发，从而使调用时能进入消息转发机制调用 forwardInvocation。
+
 ### 获取目标类aspect_hookClass
 
 ```objective-c
 static Class aspect_hookClass(NSObject *self, NSError **error) {
     NSCParameterAssert(self);
-    /*
-     self.class:当self是实例对象的时候，返回的是类对象，否则则返回自身
-     object_getClass:获得的是isa的指针
-     当self是实例对象时，self.class和object_getClass(self)相同，都是指向其类
-     当self为类对象时，self.class是自身类，object_getClass(self)则是其metaClass
-     */
+  
 	Class statedClass = self.class;
 	Class baseClass = object_getClass(self);
 
@@ -325,9 +322,9 @@ static Class aspect_hookClass(NSObject *self, NSError **error) {
 	}else if (class_isMetaClass(baseClass)) {
         return aspect_swizzleClassInPlace((Class)self);
         //  statedClass！=baseClass，且不满足上述两个条件，则说明是KVO模式下的实例对象，要混写其metaClass
-    }else if (statedClass != baseClass) {
+	}else if (statedClass != baseClass) {
         return aspect_swizzleClassInPlace(baseClass);
-    }
+	}
 
     //  上述情况都不满足，则说明是实例对象
     //  采用动态创建子类向其注入方法，最后替换实例对象的isa指针使其指向新创建的子类来实现Aspects
@@ -360,17 +357,81 @@ static Class aspect_hookClass(NSObject *self, NSError **error) {
 }
 ```
 
+`aspect_hookClass` 分别对实例对象和类对象做了不同处理。首先通过 `self.class` 和 `objc_getClass(self)` 的值来判断当前对象的环境，分为四种场景，分别是 子类化过的实例对象、类对象和元类对象 、 KVO模式下的实例对象和实例对象。对于子类化过的实例对象直接返回其类即可；类对象、元类对象和 KVO模式下的实例对象调用 `aspect_swizzleClassInPlace` 替换 `forwardInvocation` 的实现；若是实例对象，则创建以 `_Aspects_` 结尾的子类，再替换 ``forwardInvocation`` 的实现和实例对象 `isa` 指针。
 
+关于 `self.class` 和 `objc_getClass(self)` 这里稍微补充下：
 
+- self.class: 当self是实例对象的时候，返回的是类对象，否则则返回自身 。  
 
+- object_getClass: 获得的是 isa 的指针。  
+
+- 当 self 是实例对象时，self.class 和 object_getClass(self) 相同，都是指向其类，当 self 为类对象时，self.class 是自身类，object_getClass(self) 则是其 metaClass。
+
+### 真正调用APECTS_ARE_BEING_CALLED
+
+```objective-c
+//  交换后的__aspects_forwardInvocation:方法实现
+static void __ASPECTS_ARE_BEING_CALLED__(__unsafe_unretained NSObject *self, SEL selector, NSInvocation *invocation) {
+    NSCParameterAssert(self);
+    NSCParameterAssert(invocation);
+    SEL originalSelector = invocation.selector;
+	SEL aliasSelector = aspect_aliasForSelector(invocation.selector);
+    invocation.selector = aliasSelector;
+    AspectsContainer *objectContainer = objc_getAssociatedObject(self, aliasSelector);
+    AspectsContainer *classContainer = aspect_getContainerForClass(object_getClass(self), aliasSelector);
+    AspectInfo *info = [[AspectInfo alloc] initWithInstance:self invocation:invocation];
+    NSArray *aspectsToRemove = nil;
+
+    // Before hooks.
+    aspect_invoke(classContainer.beforeAspects, info);
+    aspect_invoke(objectContainer.beforeAspects, info);
+
+    // Instead hooks.
+    BOOL respondsToAlias = YES;
+    if (objectContainer.insteadAspects.count || classContainer.insteadAspects.count) {
+        aspect_invoke(classContainer.insteadAspects, info);
+        aspect_invoke(objectContainer.insteadAspects, info);
+    }else {
+        Class klass = object_getClass(invocation.target);
+        do {
+            if ((respondsToAlias = [klass instancesRespondToSelector:aliasSelector])) {
+                [invocation invoke];
+                break;
+            }
+        }while (!respondsToAlias && (klass = class_getSuperclass(klass)));
+    }
+
+    // After hooks.
+    aspect_invoke(classContainer.afterAspects, info);
+    aspect_invoke(objectContainer.afterAspects, info);
+
+    // If no hooks are installed, call original implementation (usually to throw an exception)
+    if (!respondsToAlias) {
+        invocation.selector = originalSelector;
+        SEL originalForwardInvocationSEL = NSSelectorFromString(AspectsForwardInvocationSelectorName);
+        if ([self respondsToSelector:originalForwardInvocationSEL]) {
+            ((void( *)(id, SEL, NSInvocation *))objc_msgSend)(self, originalForwardInvocationSEL, invocation);
+        }else {
+            [self doesNotRecognizeSelector:invocation.selector];
+        }
+    }
+
+    // Remove any hooks that are queued for deregistration.
+    [aspectsToRemove makeObjectsPerformSelector:@selector(remove)];
+}
+```
+
+做完前面步骤后，当调用目标方法时，就是走到替换的 `__ASPECTS_ARE_BEING_CALLED__` 方法中，按调用时机从 AspectsContainer 获取 Aspects 注入。
 
 ### 移除aspect_remove
 
-移除的逻辑比较清晰，这里就用图描述下具体都做了什么。
+移除的逻辑比较清晰，这里就用图描述下具体都做了什么，配合代码注释使用更佳。
 
 ![aspects_1](/Users/yehuangbin/Desktop/github/iOS-Framework-Analysis/notes/images/aspects_1.jpg)
 
 # 总结
 
+`Aspects` 无论从功能性还是安全性上都可以称得上是非常优秀的 AOP 库，调用接口简单明了，内部考虑了很多异常场景，每个类的功能职责拆分得很细，非常推荐读者根据 [Aspects源码注释](https://github.com/SimonYHB/iOS-Framework-Analysis/tree/master/framework/Aspects) 再细看一遍。
 
+至此，今年 [iOS优秀开源框架解析](https://github.com/SimonYHB/iOS-Framework-Analysis) 的第二篇结束 🎉🎉。
 
