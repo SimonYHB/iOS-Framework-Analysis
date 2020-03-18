@@ -433,5 +433,11 @@ static void __ASPECTS_ARE_BEING_CALLED__(__unsafe_unretained NSObject *self, SEL
 
 `Aspects` 无论从功能性还是安全性上都可以称得上是非常优秀的 AOP 库，调用接口简单明了，内部考虑了很多异常场景，每个类的功能职责拆分得很细，非常推荐读者根据 [Aspects源码注释](https://github.com/SimonYHB/iOS-Framework-Analysis/tree/master/framework/Aspects) 再细看一遍。
 
+## 一些问题
+Aspects 也不是完美的，从执行函数到 objc_msgForward 需要经过多个消息转发，而且需要额外的内存开销去构建 Invocation， 因此**不适合处理频繁调用的方法**。  
+另外 Appects 的实现方式比较彻底，将调用都转移到 objc_msgForward 中，导致**与其他 Hook 方式不兼容**，例如对同一个函数先后使用 Aspects 和 class_replaceMethod，会导致 class_replaceMethod 获取的原方法为被 Aspects 修改过的 objc_msgForward，而修改后的 objc_msgForward 的内部调用 IMP 是 class_replaceMethod 替换后的方法，导致循环调用崩溃等问题。
+
+
+
 至此，今年 [iOS优秀开源框架解析](https://github.com/SimonYHB/iOS-Framework-Analysis) 的第二篇结束 🎉🎉。
 
