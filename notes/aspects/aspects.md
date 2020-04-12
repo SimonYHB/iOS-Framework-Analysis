@@ -257,7 +257,7 @@ static id aspect_add(id self, SEL selector, AspectOptions options, id block, NSE
 
 我们先用一张流程图画下都做了些什么事情。
 
-![aspects_0](/Users/yehuangbin/Desktop/github/iOS-Framework-Analysis/notes/images/aspects_0.jpg)
+![aspects_0](./images/aspects_0.jpg)
 
 ### 前置准备步骤
 
@@ -427,7 +427,7 @@ static void __ASPECTS_ARE_BEING_CALLED__(__unsafe_unretained NSObject *self, SEL
 
 移除的逻辑比较清晰，这里就用图描述下具体都做了什么，配合代码注释使用更佳。
 
-![aspects_1](/Users/yehuangbin/Desktop/github/iOS-Framework-Analysis/notes/images/aspects_1.jpg)
+![aspects_1](./images/aspects_1.jpg)
 
 # 总结
 
