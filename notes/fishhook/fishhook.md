@@ -2,12 +2,16 @@
 
 > 本篇是笔者解读源码项目 [iOS-Framework-Analysis](https://github.com/SimonYHB/iOS-Framework-Analysis) 的开篇，今年计划完成10个优秀第三方源码解读，欢迎star和笔者一起解读这些优秀框架的背后思想，从而提升自己的内功。该篇详细的源码注释已上传 [fishhook源码注释](https://github.com/SimonYHB/iOS-Framework-Analysis/tree/master/framework/fishhook)，如有需要请自取 🐝🐝。
 
-在iOS平台下，说起Hook首先会想起`MethodSwizzling`这个苹果提供的工具，利用Objective-C的Runtime的特性，通过在消息转发时交换方法实现（IMP）的机会。但MethodSwizzling只能对Objective-C方法进行Hook，如果要对C/C++方法进行Hook操作，可以使用facebook提供的`fishhook`框架，本文是对该框架的解读。
+在iOS平台下，说起Hook首先会想起 `MethodSwizzling` 这个苹果提供的工具，利用Objective-C的Runtime的特性，通过在消息转发时交换方法实现（IMP）的机会。但MethodSwizzling只能对Objective-C方法进行Hook，如果要对C/C++方法进行Hook操作，可以使用facebook提供 `fishhook`框架，本文是对该框架的解读。
 
 ##  初识fishhook
 首先，我们需要了解几个常见的概念，有助于后面源码的阅读。
 
-Mach-O:  在iOS和OS X系统下，所有可执行文件、dylib 以及 Bundle都是Mach-O格式。主要有*Header*、*Load Commands*和*Data*组成。
+### Mach-O
+
+在iOS和OS X系统下，所有可执行文件、dylib 以及 Bundle都是Mach-O格式。主要有*Header*、*Load Commands*和*Data*组成。
+
+
 
 ![](./images/fishhook_0.png)
 Mach-O的具体结构(看看就好，后面有不清楚的再回头找)：
@@ -78,19 +82,25 @@ struct segment_command_64 { /* for 64-bit architectures */
 
 ```
 
+### 镜像（image）
 
+dyld会将Mach-O文件作为镜像，既镜像就是Mach-O。
 
+### dyld （ the dynamic link editor ）
 
-dyld （ the dynamic link editor ）：负责将各种各样程序需要的镜像加载到程序运行的内存空间中，这个过程发生的时间非常早 — 在 objc 运行时初始化之前。
+负责将各种各样程序需要的镜像加载到程序运行的内存空间中，这个过程发生的时间非常早 — 在 objc 运行时初始化之前。
 
-镜像（image）：dyld会将Mach-O文件作为镜像，既镜像就是Mach-O。
+- _dyld_register_func_for_add_image
 
-_dyld_register_func_for_add_image： 每个镜像被dyld加载时，都会执行系统注册过的回调函数，可以通过该方法注册自定义的回调函数，当调用该函数注册时，会让所有镜像都执行回调函数，无论是否已经加载过。
+  每个镜像被dyld加载时，都会执行系统注册过的回调函数，可以通过该方法注册自定义的回调函数，当调用该函数注册时，会让所有镜像都执行回调函数，无论是否已经加载过。
 
-dyld_stub_binder： 在目标符号（例如 printf）首次被调用时，将其链接到指定的动态链接库 ，找到对应的符号表真实地址进行绑定（printf 符号位于 _DATA 端中的 lazy 符号表中）。
+- dyld_stub_binder
 
+  在目标符号（例如 printf）首次被调用时，将其链接到指定的动态链接库 ，找到对应的符号表真实地址进行绑定（printf 符号位于 _DATA 端中的 lazy 符号表中）。
 
-Mach-O的动态绑定机制：编译App时，系统共享库不会编译到Mach-O文件中，而是第一次调用才通过dyld动态绑定，将MACH-O的DATA段符号表中对应的指针指向外部系统共享库中的真正实现
+### Mach-O的动态绑定机制
+
+编译App时，系统共享库不会编译到Mach-O文件中，而是第一次调用才通过dyld动态绑定，将MACH-O的DATA段符号表中对应的指针指向外部系统共享库中的真正实现
 
 **fishhook正是利用动态绑定机制，先确定某一个符号在 _DATA 段中的位置，然后保存原符号对应的函数指针，并使用新的函数指针覆盖原有符号的函数指针，实现替换。**
 
